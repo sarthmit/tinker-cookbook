@@ -1,13 +1,11 @@
 import asyncio
 import logging
 from datetime import datetime
+from typing import List
 
 import chz
 from tinker_cookbook import cli_utils, model_info
-from tinker_cookbook.recipes.math_rl import (
-    arithmetic_env,
-    math_env,
-)
+from tinker_cookbook.recipes.mixed_env import get_dataset_builders
 from tinker_cookbook.rl.train import AsyncConfig, Config, main
 from tinker_cookbook.rl.types import RLDatasetBuilder
 from tinker.types import LossFnType
@@ -20,13 +18,14 @@ class CLIConfig:
     """Simple command-line configuration for RL training."""
 
     # Model configuration
-    model_name: str = "Qwen/Qwen3-4B-Instruct-2507"
+    model_name: str = "meta-llama/Llama-3.1-8B-Instruct"
     lora_rank: int = 32
     renderer_name: str | None = None
     load_checkpoint_path: str | None = None
 
     # Environment configuration
-    env: str = "arithmetic"  # Options: arithmetic, math, polaris, deepmath, gsm8k
+    env: List[str] = ["arithmetic"]  # Options: arithmetic, math, polaris, deepmath, gsm8k
+    env_splits: List[float] = [1.0]  # Proportion of each env to use for training
     seed: int = 0  # Random seed for data shuffling
 
     # Training hyperparameters
@@ -63,34 +62,23 @@ class CLIConfig:
 
 
 def get_dataset_builder(
-    env: str,
+    env: List[str],
+    splits: List[float],
     batch_size: int,
     model_name: str,
     renderer_name: str,
     group_size: int,
     seed: int = 0,
-) -> RLDatasetBuilder:
-    if env == "arithmetic":
-        return arithmetic_env.ArithmeticDatasetBuilder(
-            batch_size=batch_size,
-            model_name_for_tokenizer=model_name,
-            renderer_name=renderer_name,
-            n_batches=100,
-            include_fewshot=True,
-            group_size=group_size,
-        )
-    elif env in ["math", "polaris", "deepmath", "gsm8k"]:
-        return math_env.get_math_dataset_builder(
-            dataset_name=env,
-            batch_size=batch_size,
-            model_name_for_tokenizer=model_name,
-            renderer_name=renderer_name,
-            group_size=group_size,
-            seed=seed,
-        )
-    else:
-        raise ValueError(f"Unknown environment: {env}")
-
+) -> List[RLDatasetBuilder]:
+    return get_dataset_builders(
+        dataset_names=env if isinstance(env, list) else [env],
+        batch_size=batch_size,
+        splits=splits,
+        model_name_for_tokenizer=model_name,
+        renderer_name=renderer_name,
+        group_size=group_size,
+        seed=seed,
+    )
 
 async def cli_main(cli_config: CLIConfig):
     """Convert CLI config to full config and run training."""
@@ -116,6 +104,7 @@ async def cli_main(cli_config: CLIConfig):
         learning_rate=cli_config.learning_rate,
         dataset_builder=get_dataset_builder(
             env=cli_config.env,
+            splits=cli_config.env_splits,
             batch_size=cli_config.groups_per_batch,
             model_name=cli_config.model_name,
             renderer_name=renderer_name,
